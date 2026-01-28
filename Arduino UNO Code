@@ -1,0 +1,235 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <DHT.h>
+#include <NewPing.h>
+#include <Servo.h>
+
+// Define pin assignments for sensors and actuators
+const int MOISTURE_SENSOR_ANALOG_PIN = A0;
+const int MOISTURE_SENSOR_DIGITAL_PIN = 6;
+const int LDR_PIN = A1;
+const int ULTRASONIC_TRIGGER_PIN = 11;
+const int ULTRASONIC_ECHO_PIN = 13;
+const int RED_LED_PIN = 12;
+const int DHT_PIN = A3;
+const int BUTTON_PIN = 7;
+const int RELAY_PIN = 8;
+const int SERVO_PIN = 9;
+
+// Define LCD parameters
+const int LCD_COLUMNS = 16;
+const int LCD_ROWS = 2;
+const int I2C_ADDRESS = 0x27;
+
+// Define threshold values for sensor readings
+const int LIGHT_THRESHOLD = 500;
+const int MOISTURE_THRESHOLD = 150;
+const int TANK_EMPTY_THRESHOLD = 100;
+
+// Initialize objects for LCD, DHT sensor, ultrasonic sensor, and servo motor
+LiquidCrystal_I2C lcd(I2C_ADDRESS, LCD_COLUMNS, LCD_ROWS);
+DHT dht(DHT_PIN, DHT11);
+NewPing ultrasonicSensor(ULTRASONIC_TRIGGER_PIN, ULTRASONIC_ECHO_PIN);
+Servo doorServo;
+int menuIndex = 0;
+
+// Define variables for timing sensor updates
+unsigned long lastSensorUpdate = 0;
+const unsigned long sensorUpdateInterval = 500;
+
+void setup() {
+  // Configure pin modes
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(RELAY_PIN, OUTPUT);
+  
+  // Attach servo motor
+  doorServo.attach(SERVO_PIN);
+  
+  // Initialize LCD display
+  lcd.begin(16, 2);
+  lcd.backlight();
+  lcd.clear();
+  lcd.print("Self-Watering");
+  lcd.setCursor(0, 1);
+  lcd.print("System");
+  
+  // Initialize DHT sensor
+  dht.begin();
+}
+
+void loop() {
+  // Display main menu on LCD and handle menu navigation
+  displayMainMenu();
+  handleMenuNavigation();
+}
+
+// Display main menu on LCD
+void displayMainMenu() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Self-Watering");
+  lcd.setCursor(0, 3);
+  lcd.print("System");
+}
+
+// Display temperature and humidity readings on LCD
+void displayTemperatureHumidity() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Temp: ");
+  lcd.print(readTemperature());
+  lcd.print("C");
+  lcd.setCursor(0, 1);
+  lcd.print("Humidity: ");
+  lcd.print(readHumidity());
+  lcd.print("%");
+}
+
+// Display light level reading on LCD
+void displayLightLevel() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Light Level: ");
+  lcd.print(readLightLevel());
+}
+
+// Display moisture level reading on LCD
+void displayMoistureLevel() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Moisture: ");
+  lcd.print(readMoistureLevel());
+}
+
+// Display water level reading on LCD
+void displayWaterLevel() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Water Level: ");
+  lcd.print(readWaterLevel());
+}
+
+// Handle navigation through the main menu using a button
+void handleMenuNavigation() {
+  int choice = 0;
+  unsigned long lastDebounceTime = 0;
+  unsigned long debounceDelay = 10;
+  while (true) {
+    choice = digitalRead(BUTTON_PIN);
+    if (choice == LOW) {
+      delay(50);
+      choice = digitalRead(BUTTON_PIN);
+      if (choice == LOW) {
+        menuIndex = (menuIndex + 1) % 4;
+        switch (menuIndex) {
+          case 0:
+            displayTemperatureHumidity();
+            break;
+          case 1:
+            displayLightLevel();
+            break;
+          case 2:
+            displayMoistureLevel();
+            break;
+          case 3:
+            displayWaterLevel();
+            break;
+        }
+        checkAndDispenseWater();
+        delay(100);
+      }
+    }
+    unsigned long currentMillis = millis();
+    if (currentMillis - lastSensorUpdate >= sensorUpdateInterval) {
+      switch (menuIndex) {
+        case 0:
+          displayTemperatureHumidity();
+          break;
+        case 1:
+          displayLightLevel();
+          break;
+        case 2:
+          displayMoistureLevel();
+          break;
+        case 3:
+          displayWaterLevel();
+          break;
+      }
+      lastSensorUpdate = currentMillis;
+    }
+  }
+}
+
+// Check moisture and water levels, dispense water if needed, and adjust servo
+void checkAndDispenseWater() {
+  int moistureLevel = readMoistureLevel();
+  int waterLevel = readWaterLevel();
+
+  // Dispense water if moisture level is below threshold
+  if (moistureLevel < MOISTURE_THRESHOLD) {
+    digitalWrite(RELAY_PIN, LOW);
+    delay(2000);
+    digitalWrite(RELAY_PIN, HIGH);
+  } else {
+    digitalWrite(RELAY_PIN, HIGH);
+  }
+
+  // Open trap door if water tank is almost empty
+  if (waterLevel < TANK_EMPTY_THRESHOLD) {
+    openTrapDoor();
+  } else {
+    closeTrapDoor();
+  }
+
+  // Adjust servo position based on water level
+  adjustServo(waterLevel);
+}
+
+// Open the trap door
+void openTrapDoor() {
+  doorServo.write(180);
+  delay(1000);
+}
+
+// Close the trap door
+void closeTrapDoor() {
+  doorServo.write(0);
+  delay(1000);
+}
+
+// Adjust servo position based on water level
+void adjustServo(int waterLevel) {
+  if (waterLevel <= 10) {
+    doorServo.write(180);
+  } else if (waterLevel >= 0 && waterLevel <= 2) {
+    doorServo.write(0);
+  } else {
+    // Do nothing
+  }
+}
+
+// Read temperature from DHT sensor
+float readTemperature() {
+  return dht.readTemperature();
+}
+
+// Read humidity from DHT sensor
+float readHumidity() {
+  return dht.readHumidity();
+}
+
+// Read moisture level from moisture sensor
+int readMoistureLevel() {
+  return analogRead(MOISTURE_SENSOR_ANALOG_PIN);
+}
+
+// Read light level from LDR sensor
+int readLightLevel() {
+  return analogRead(LDR_PIN);
+}
+
+// Read water level from ultrasonic sensor
+int readWaterLevel() {
+  int distance = ultrasonicSensor.ping_cm();
+  return distance;
+}
